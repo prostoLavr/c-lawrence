@@ -7,6 +7,7 @@
 #include <termios.h>
 #include <unistd.h>
 
+
 char getch_immediate() {
     struct termios oldt, newt;
     char ch;
@@ -24,29 +25,28 @@ char DEFAULT_INTERPRETER_NAME[] = "main";
 char DEFAULT_FOLDER_NAME[] = ".dynamic";
 
 
-int prepare(char *name) {
+char *prepare(char *name) {
     if (mkdir(DEFAULT_FOLDER_NAME, 0777) == -1) {
-        perror("mkdir");
+      perror("mkdir");
     }
-    
-    char dir_name[
+    if (name == NULL) {
+      name = DEFAULT_INTERPRETER_NAME;
+    }
+
+    int dirname_len = 
       strlen(DEFAULT_FOLDER_NAME) 
-      + 1
-      + (
-        name
-          ? strlen(name)
-          : strlen(DEFAULT_INTERPRETER_NAME)
-      )
-    ];
-    strcpy(dir_name, DEFAULT_FOLDER_NAME);
-    strcat(dir_name, "/");
-    strcat(dir_name, name ? name : DEFAULT_INTERPRETER_NAME);
+        + 1
+        + strlen(name)
+        + 1
+    ;
+
+    char *dir_name = malloc(dirname_len);
+    snprintf(dir_name, dirname_len, "%s/%s", DEFAULT_FOLDER_NAME, name);
     
     if (mkdir(dir_name, 0777) == -1) {
-        perror("mkdir");
-        return 1;
+      perror("mkdir");
     }
-    return 0;
+    return dir_name;
 }
 
 char *print_help() {
@@ -78,9 +78,9 @@ char *read_input_line() {
       puts("\n");
       return input;
     }
-    if (input_len >= allocated - 1) {
+    if (input_len + 2 >= allocated) {
       allocated *= 2;
-      input = realloc(input, input_len);
+      input = realloc(input, allocated);
     }
     if (input_len > 0 && input_char == BACKSPACE) {
       char *last_next_line_ptr = strrchr(input, '\n');
@@ -113,13 +113,62 @@ char *print_hello(char *name) {
   }
 }
 
+const char *CODE_FILENAME_TEMPLATE = "code_XXXXXX.c";
+
+char *code_write(char* path, char *code) {
+    printf("Try to write code to path %s\n", path);
+    int filename_size = strlen(path) + 1 + strlen(CODE_FILENAME_TEMPLATE) + 2;
+    char *filename = malloc(filename_size);
+    filename[0] = '\0';
+    snprintf(filename, filename_size, "%s/%s", path, CODE_FILENAME_TEMPLATE);
+    printf("Path template %s\n", filename);
+    
+    int fd = mkstemps(filename, 2);
+    if (fd == -1) {
+        perror("Failed to create temporary file");
+        return NULL;
+    }
+    char *extension_chr_ptr = strrchr(filename, '.');
+    *extension_chr_ptr = '\0';
+
+    printf("Temporary file created at: %s.c\n", filename);
+
+    write(fd, code, strlen(code));
+
+    close(fd);
+    return filename;
+}
+
+void code_compile(char *filename) {
+  char command[1024];
+  snprintf(
+    command,
+    sizeof(command),
+    "gcc -shared -o %s.so -fPIC %s.c",
+    filename,
+    filename
+  );
+  printf("Execute: %s\n", command);
+  system(command);
+}
+
 
 void interpreter(char *name) {
   print_hello(name);  
+  char *path = prepare(name);
+  if (path == NULL) {
+    printf("Error on prepare\n");
+  }
   while (true) {
     char *input = read_input_line();
     if (input != NULL) {
       printf("Total input bellow:\n%s", input);
+      char *filename = code_write(path, input);
+      if (filename == NULL) {
+        printf("Write code error :(");
+      } else {
+        code_compile(filename);
+      }
       // Total input here
       free(input);
     }
